@@ -1,7 +1,6 @@
 <script setup lang="ts">
     import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
     import { faBars } from '@fortawesome/free-solid-svg-icons'
-    import { defineProps } from 'vue';
 
     const props = defineProps<{
         userName: string

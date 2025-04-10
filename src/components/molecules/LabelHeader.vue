@@ -1,6 +1,5 @@
 <script setup lang="ts">
     import Label from '@/components/atoms/Label.vue'
-    import { defineProps } from 'vue'
 
     const props = defineProps<{
         label: string

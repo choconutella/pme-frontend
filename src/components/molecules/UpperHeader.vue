@@ -1,7 +1,6 @@
 <script setup lang="ts">
     import Logo from '@/components/atoms/Logo.vue'
     import Title from '@/components/atoms/Title.vue'
-    import { defineProps } from 'vue'
 
     const props = defineProps<{
         title: string

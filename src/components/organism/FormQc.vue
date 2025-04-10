@@ -1,11 +1,14 @@
 <script setup lang="ts">
-    import SelectInput from '@/components/molecules/SelectInput.vue'
-    import TextInput from '@/components/molecules/TextInput.vue'
-    import DateInput from '@/components/molecules/DateInput.vue'
+    import BackButton from '@/components/molecules/BackButton.vue'
     import AddTestButton from '@/components/molecules/AddTestButton.vue'
     import TableInput from '@/components/molecules/TableInput.vue'
 
-    import { ref, onMounted } from 'vue'
+    import { ref, onMounted, computed } from 'vue'
+    
+    // Define props for edit mode
+    const props = defineProps<{
+        qcId?: string
+    }>()
 
     // Create reactive state for analyzers with proper type
     interface SelectType {
@@ -34,6 +37,8 @@
     const statusMessage = ref('')
     const isSuccess = ref(false)
     const isLoading = ref(false)
+    const isLoadingAnalyzers = ref(false)
+    const isLoadingPmes = ref(false)
 
     // Form data state
     const formData = ref<FormData>(
@@ -48,57 +53,110 @@
     // Create reactive state for table rows
     const tableRows = ref<TableRow[]>([])
 
+    // Determine if we are in edit mode
+    const isEditMode = computed(() => !!props.qcId)
+
+    // Form title changes based on mode
+    const formTitle = computed(() => isEditMode.value ? 'Edit QC PME' : 'New QC PME')
+
+    const isFormValid = computed(() => {
+        // Check if basic form fields are filled
+        const hasRequiredFields = 
+            !!formData.value.anzId && 
+            !!formData.value.name && 
+            !!formData.value.periode && 
+            !!formData.value.activityDate
+        
+        // Check if we have at least one table row
+        const hasTableRows = tableRows.value.length > 0
+        
+        // Check if all table rows have valid data
+        const hasValidTableData = tableRows.value.every(row => {
+            return (
+                // Test name is required
+                !!row.testName && 
+                // Mean and meanGroup should be valid numbers if provided
+                (row.mean === null || (typeof row.mean === 'number' && !isNaN(row.mean))) &&
+                (row.meanGroup === null || (typeof row.meanGroup === 'number' && !isNaN(row.meanGroup)))
+            )
+        })
+        
+        return hasRequiredFields && hasTableRows && hasValidTableData
+    })
+
     // Function to fetch analyzers from API
     const fetchAnalyzers = () => {
-        fetch(
-            `${import.meta.env.VITE_API_URL}/load`,
-            {
-                method: "GET",
-                headers: { "Content-Type": "application/json" },
-            },
-        ) 
+        isLoadingAnalyzers.value = true
+        
+        fetch(`${import.meta.env.VITE_API_URL}/analyzer`)
             .then(response => {
                 if (!response.ok) {
-                    throw new Error('Network response was not ok')
+                    throw new Error(`HTTP error! Status: ${response.status}`)
                 }
-                return response.json();
+                return response.json()
             })
             .then(response => {
-                // Check if response has data property and it's an array
-                if (response.ok && 
-                    response.data && 
-                    response.data.analyzers && 
-                    response.data.pmes && 
-                    Array.isArray(response.data.analyzers) &&
-                    Array.isArray(response.data.pmes)
-                ) {
+                if (response.ok && response.data && Array.isArray(response.data)) {
                     // Map API data to the format expected by the select component
-                    analyzers.value = response.data.analyzers.map((analyzer: { code: string; name: string }) => ({
+                    analyzers.value = response.data.map((analyzer: { code: string; name: string }) => ({
                         value: analyzer.code,
                         name: analyzer.name
                     }))
-
-                    pmes.value = response.data.pmes.map((pme: { code: string; name: string }) => ({
-                        value: pme.code,
-                        name: pme.name
-                    }))
                 } else {
-                    console.error('Invalid response format:', response)
+                    console.error('Invalid analyzer response format:', response)
                     analyzers.value = []
-                    pmes.value = []
                 }
             })
             .catch(error => {
                 console.error('Error fetching analyzers:', error)
-                // Fallback data in case of error
                 analyzers.value = []
-            });
+            })
+            .finally(() => {
+                isLoadingAnalyzers.value = false
+            })
+    }
+
+    // Function to fetch PMEs from API
+    const fetchPmes = () => {
+        isLoadingPmes.value = true
+        
+        fetch(`${import.meta.env.VITE_API_URL}/pme`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`)
+                }
+                return response.json()
+            })
+            .then(response => {
+                if (response.ok && response.data && Array.isArray(response.data)) {
+                    // Map API data to the format expected by the select component
+                    pmes.value = response.data.map((pme: { code: string; name: string }) => ({
+                        value: pme.code,
+                        name: pme.name
+                    }))
+                } else {
+                    console.error('Invalid PME response format:', response)
+                    pmes.value = []
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching PMEs:', error)
+                pmes.value = []
+            })
+            .finally(() => {
+                isLoadingPmes.value = false
+            })
     }
     
-    // Fetch analyzers on component mount
-    onMounted(fetchAnalyzers)
-
-
+    // Fetch analyzers and PMEs on component mount
+    onMounted(() => {
+        fetchAnalyzers()
+        fetchPmes()
+        
+        if (isEditMode.value) {
+            loadQcData()
+        }
+    })
 
     // Counter to generate unique test names
     let testCounter = 1
@@ -114,26 +172,92 @@
         console.log(tableRows.value)
     }
 
+    // Load QC data for editing
+    const loadQcData = () => {
+        if (!props.qcId) return
+        
+        isLoading.value = true
+        
+        fetch(`${import.meta.env.VITE_API_URL}/qc/${props.qcId}`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error: ${response.status}`)
+            }
+            return response.json()
+        })
+        .then(response => {
+            if (response.ok && response.data) {
+                // Populate form data with response
+                const qcData = response.data
+
+                /**
+                * Processes QC data and initializes the form data
+                * 
+                * @remarks
+                * The activityDate is converted to YYYY-MM-DD format (instead of using ISOString)
+                * because this format is compatible with HTML date input fields, which require
+                * date values in this specific format for proper display and interaction.
+                * ISOString would include time and timezone information (e.g., 2023-05-15T08:30:00Z)
+                * which is not suitable for date-only input fields.
+                **/
+                const date = new Date(qcData.activityDate);
+                const convertedActivityDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                
+                formData.value = {
+                    anzId: qcData.anzId,
+                    name: qcData.name,
+                    periode: qcData.periode,
+                    activityDate: new Date(qcData.activityDate)
+                }
+
+                
+                // Populate table rows
+                tableRows.value = qcData.details.map((detail: any) => ({
+                    testName: detail.testCd,
+                    mean: detail.mean,
+                    meanGroup: detail.meanGroup
+                }))
+            } else {
+                console.error('Error loading QC data:', response.error)
+                statusMessage.value = 'Failed to load QC data'
+                isSuccess.value = false
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching QC data for editing:', error)
+            statusMessage.value = 'Error loading data: ' + error.message
+            isSuccess.value = false
+        })
+        .finally(() => {
+            isLoading.value = false
+        })
+    }
+
     // Form submission handler using Promises
     const handleSubmit = (event: Event) => {
         event.preventDefault()
-        isLoading.value = true
-        statusMessage.value = ''
 
-        // Validate required fields
-        if (!formData.value.anzId || !formData.value.name || !formData.value.periode || !formData.value.activityDate) {
-            statusMessage.value = 'Please fill in all required fields'
+        console.log(formData.value.activityDate)
+        
+        if (!isFormValid.value) {
+            // Display appropriate validation messages
+            if (!formData.value.anzId || !formData.value.name || !formData.value.periode || !formData.value.activityDate) {
+                statusMessage.value = 'Please fill in all required fields'
+            } else if (tableRows.value.length === 0) {
+                statusMessage.value = 'Please add at least one test'
+            } else {
+                statusMessage.value = 'Please ensure all test entries are valid'
+            }
+            
             isSuccess.value = false
-            isLoading.value = false
             return
         }
         
-        if (tableRows.value.length === 0) {
-            statusMessage.value = 'Please add at least one test'
-            isSuccess.value = false
-            isLoading.value = false
-            return
-        }
+        isLoading.value = true
+        statusMessage.value = ''
         
         // Format data for API
         const details = tableRows.value.map(row => ({
@@ -150,9 +274,16 @@
             details: details
         }
         
-        // Send POST request using Promises
-        fetch(`${import.meta.env.VITE_API_URL}/qc`, {
-            method: 'POST',
+        // Determine API endpoint and method based on mode
+        const url = isEditMode.value 
+            ? `${import.meta.env.VITE_API_URL}/qc/${props.qcId}` 
+            : `${import.meta.env.VITE_API_URL}/qc`
+        
+        const method = isEditMode.value ? 'PUT' : 'POST'
+        
+        // Send request using Promises
+        fetch(url, {
+            method: method,
             headers: {
                 'Content-Type': 'application/json',
             },
@@ -168,11 +299,15 @@
         })
         .then(data => {
             // Success handling
-            statusMessage.value = 'Data submitted successfully!'
+            statusMessage.value = isEditMode.value 
+                ? 'Data updated successfully!' 
+                : 'Data submitted successfully!'
             isSuccess.value = true
             
-            // Optional: Reset form
-            resetForm()
+            // if (!isEditMode.value) {
+            //     // Only reset form for new records
+            //     resetForm()
+            // }
         })
         .catch(error => {
             // Error handling
@@ -201,13 +336,20 @@
     const handleAnalyzerSelect = (value: string) => {
         formData.value.anzId = value
     }
+
+    const goBack = () => {
+        window.history.back()
+    }
 </script>
 
 <template>
-    <form @submit="handleSubmit">
-        <div class="md:mx-5">
-            <div class="flex justify-center items-center text-2xl font-semibold py-7">
-                <h1>New QC PME Data</h1>
+    <form id="form" @submit="handleSubmit">
+        <div>
+            <div class="mt-5">
+                <BackButton @click="goBack" class="ms-20">Back</BackButton>
+                <div class="text-center">
+                    <h1 class="text-2xl font-semibold">{{ formTitle }}</h1>
+                </div>
             </div>
             
             <!-- Status message -->
@@ -216,51 +358,64 @@
                 {{ statusMessage }}
             </div>
             
+            <!-- Loading indicator -->
+            <div v-if="isLoading && isEditMode" class="text-center p-2">
+                <span class="text-gray-600">Loading data...</span>
+            </div>
+            
             <div class="flex flex-wrap justify-around items-baseline pt-5 mx-20">
                 <div class="w-full xl:w-1/2 mb-6 md:mb-0">
                     <div class="w-9/12 pb-4">
-                        <label for="anzId" class="font-medium text-nowrap">Analyzer</label>
+                        <label for="analyzer-selector" class="font-medium text-nowrap">Analyzer</label>
                         <select 
-                            name="anzId" 
+                            id="analyzer-selector"
+                            name="analyzer-selector" 
                             v-model="formData.anzId" 
                             class="border border-gray-300 rounded-md p-2 w-full"
+                            :disabled="isLoadingAnalyzers"
                         >
-                            <option value="" disabled selected>Select an analyzer</option>
+                            <option v-if="isLoadingAnalyzers" value="" disabled selected>Loading analyzers...</option>
+                            <option v-else value="" disabled selected>Select an analyzer</option>
                             <option v-for="anz in analyzers" :key="anz.value" :value="anz.value">{{ anz.name }}</option>
                         </select>
                     </div>
                     <div class="w-9/12 pb-4">
-                        <label for="name" class="font-medium text-nowrap">PME Name</label>
+                        <label for="pme-selector" class="font-medium text-nowrap">PME Name</label>
                         <select
-                            name="name"
+                            id="pme-selector"
+                            name="pme-selector"
                             v-model="formData.name"
                             class="border border-gray-300 rounded-md p-2 w-full"
+                            :disabled="isLoadingPmes"
                         >
-                            <option value="" disabled selected>Select a PME</option>
+                            <option v-if="isLoadingPmes" value="" disabled selected>Loading PMEs...</option>
+                            <option v-else value="" disabled selected>Select a PME</option>
                             <option v-for="pme in pmes" :key="pme.value" :value="pme.value">{{ pme.name }}</option>
                         </select>
                     </div>
                     <div class="w-9/12 pb-4">
-                        <label for="periode" class="font-medium text-nowrap">Periode</label>
+                        <label for="periode-input" class="font-medium text-nowrap">Periode</label>
                         <input 
                             type="text" 
-                            name="periode" 
+                            id="periode-input"
+                            name="periode-input" 
                             v-model="formData.periode" 
                             class="border border-gray-300 rounded-md p-2 w-full"  
                             placeholder="e.g. 2025-01"
                         />
                     </div>
                     <div class="w-9/12 pb-4">
-                        <label for="activityDate" class="font-medium text-nowrap">Activity Date</label>
+                        <label for="activity-date" class="font-medium text-nowrap">Activity Date</label>
                         <input 
                             type="date" 
+                            id="activity-date"
                             name="activityDate" 
                             v-model="formData.activityDate" 
                             class="border border-gray-300 rounded-md p-2 w-full"
                         />
                     </div>
                 </div>
-                <div class="w-full xl:w-1/2 sm:pt-10">
+                <div id="qc-details-table" class="w-full xl:w-1/2 sm:pt-10">
                     <TableInput 
                         :tableRows="tableRows"
                         @update:tableRows="newRows => tableRows = newRows" 
@@ -272,24 +427,34 @@
             </div>
             <div class="flex justify-center items-center mt-20">
                 <button
-                    class="
-                        bg-red-300 text-white shadow-lg py-1.5 sm:px-12 md:px-12 
-                        lg:px-10 xl:px-18 2xl:px-26 rounded-lg mt-5 mr-5
-                        hover:bg-red-400"
+                    v-if="isEditMode"
+                    id="cancel-button"
+                    class="bg-gray-300 text-gray-700 shadow-lg py-1.5 px-12 rounded-lg mt-5 mr-5 hover:bg-gray-400"
+                    type="button"
+                    @click="goBack"
+                >
+                    Cancel
+                </button>
+                <button
+                    v-if="!isEditMode"
+                    id="clear-button"
+                    class="bg-red-300 text-white shadow-lg py-1.5 px-12 rounded-lg mt-5 mr-5 hover:bg-red-400"
                     type="reset"
                     @click="resetForm"
                 >
                     Clear
                 </button>
                 <button 
-                    class="
-                        bg-blue-400 text-white shadow-lg py-1.5 sm:px-12 md:px-12 lg:px-10 xl:px-18 2xl:px-26 
-                        rounded-lg mt-5
-                        hover:bg-blue-500" 
+                    id="submit-button"
+                    class=" shadow-lg py-1.5 px-12 rounded-lg mt-5" 
                     type="submit"
-                    :disabled="isLoading"
+                    :disabled="isLoading || !isFormValid"
+                    :class="{
+                        'bg-blue-400 text-white hover:bg-blue-500': !isLoading || isFormValid,
+                        'bg-gray-200 text-black opacity-80 cursor-not-allowed': isLoading || !isFormValid
+                    }"
                 >
-                    {{ isLoading ? 'Submitting...' : 'Submit' }}
+                    {{ isLoading ? 'Processing...' : (isEditMode ? 'Update' : 'Submit') }}
                 </button>
             </div>
         </div>

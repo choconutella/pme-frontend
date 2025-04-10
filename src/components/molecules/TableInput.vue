@@ -1,5 +1,5 @@
 <script setup lang="ts">
-    import { ref, defineProps, defineEmits } from 'vue'
+    import { ref } from 'vue'
     import TextBox from '@/components/atoms/TextBox.vue';
 
     // Define props to receive the rows from parent
@@ -43,6 +43,7 @@
             <tr v-for="(row, index) in tableRows" :key="index">
                 <td class="w-3/12">
                     <input 
+                        id="test-input-{{ index }}"
                         type="text" 
                         :value="row.testName?.toUpperCase()" 
                         placeholder="e.g. HB" @input="value => updateTestNameRow(index, value)" 
@@ -51,6 +52,7 @@
                 </td>
                 <td class="w-3/12">
                     <input 
+                        id="mean-input-{{ index }}"
                         type="text" 
                         :value="row.mean" 
                         placeholder="e.g. 10.4" 
@@ -60,6 +62,7 @@
                 </td>
                 <td class="w-3/12">
                     <input 
+                        id="mean-group-input-{{ index }}"
                         type="text" 
                         :value="row.meanGroup" 
                         placeholder="e.g. 10.4" 
